@@ -1,0 +1,17 @@
+<SettingScreen>
+    name: 'settings_screen'
+    size: root.width, root.height
+    BoxLayout:
+        #size: root.width, root.height
+        orientation: 'vertical'
+        CustomTabbedPannel:
+        BoxLayout:
+            padding: 40
+            Spinner:
+                text: 'Select embedded device:'
+                values: ['device1', 'device2', 'device3']
+                pos_hint: {'x':0.8, 'y':0.9}
+                size_hint: ('100dp', 0.1)
+    
+            
+        
