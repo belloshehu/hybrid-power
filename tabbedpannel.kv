@@ -2,6 +2,7 @@
     tab_pos: 'top_left'
     size_hint_y: None
     height: '70dp'
+    do_default_tab: False
     TabbedPanelItem:
         text: 'dashboard'
         on_press:  app.root.current = app.root.select_tab_item(self, self.text)
