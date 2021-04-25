@@ -7,6 +7,7 @@ from time import sleep
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.storage.jsonstore import JsonStore
 from arduino_interface import SerialInterface
+from kivy_garden.graph import MeshLinePlot, Graph
 
 
 # instance SerialInterface
