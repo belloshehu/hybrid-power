@@ -51,39 +51,15 @@ class SerialInterface:
         else:
             return False
 
-    def connect_grid(self):
-        """ connects load Grid. """
-        if self.serial_port:
-            self.serial_port.write(b'g1')
-            return True
-        else:
-            return False
-
-    def disconnect_grid(self):
-        """ disconnects load from Grid. """
-        if self.serial_port:
-            self.serial_port.write(b'g0')
-            return True
-        else:
-            return False
-
-    def connect_battery(self):
-        """ connects battery from solar pannel. """
+    def get_parameters(self, ):
+        """Get voltage and current data from embedded device(i.e. Arduino)"""
+        parameter = None
         try:
-            self.serial_port.write(b'b1')
-            return True
-        except serial.serialutil.SerialException as e:
+            parameter = self.serial_port.readline()
+        except Exception as e:
             print(e)
-        return False
-
-    def disconnect_battery(self):
-        """ disconnects battery from solar pannel. """
-        try:
-            self.serial_port.write(b'b0')
-            return True
-        except serial.serialutil.SerialException as e:
-            print(e)
-        return False
+        finally:
+            return parameter
 
 
 # testing the library:
