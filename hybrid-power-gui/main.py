@@ -1,0 +1,255 @@
+from kivy.app import App
+from kivy.uix.widget import Widget
+from kivy.lang import Builder
+from kivy.properties import ObjectProperty
+from kivy.core.window import Window
+from time import sleep
+from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.storage.jsonstore import JsonStore
+from arduino_interface import SerialInterface
+from kivy_garden.graph import MeshLinePlot, Graph
+from kivy.clock import Clock
+from kivy.properties import ObjectProperty
+from time import sleep
+
+# instance SerialInterface
+serial_interface = SerialInterface()
+
+# main screen 
+class MainScreen(Screen):
+    pass
+
+# about screen
+class AboutScreen(Screen):
+    pass
+
+
+# setting screen
+class SettingScreen(Screen):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def on_enter(self, *args):
+        # add available ports to the spinner
+        self.ids.spinner.values = serial_interface.get_port_names()
+
+    def get_selected_port(self, port_name):
+        serial_port = serial_interface.connect_port(port_name)
+        return self.connection_status(serial_port)
+
+    def connection_status(self, serial_port):
+        if serial_port:
+            self.ids.status.text = 'Connected'
+            self.ids.status.color = 'green'
+        else:
+            self.ids.status.text = 'not connected'
+            self.ids.status.color = 'red'
+
+    def refresh_port(self):
+        """ Method to refresh spinner for available ports"""
+        self.ids.spinner.text = 'available ports'
+        self.ids.status.text = 'not connected'
+        self.ids.status.color = 'red'
+
+
+class CustomScreenManager(ScreenManager):
+    app_state = JsonStore('application.json')
+    default_data_id = 'switches'
+    critical_load_ref = ObjectProperty(None)
+    non_critical_load_ref = ObjectProperty(None)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.get_app_state(self.default_data_id)
+        self.current_parameter = 0
+        self.solar_voltage = 0
+        self.main_voltage = 0
+        self.kva = 0
+        self.time_count = 0
+        # stores tuples of voltage-time pairs
+        self.voltage_graph_cordinates_points = []
+        self.wattage_graph_cordinates_points = []
+        self.time_span = 60
+        self.time_series = [x for x in range(60)]
+        
+    def start(self):
+        Clock.schedule_interval(self.get_data, 0.01)
+
+    def get_data(self, dt):
+        # obtain voltage, current values through serial interface
+        parameter = serial_interface.get_parameters()
+        if parameter:
+            parameter = parameter.decode()
+            parameter = parameter.strip()
+            print(parameter)
+            if parameter.startswith('c'):  # it is current if it starts with c
+                self.current_parameter = float(parameter[1:])  # extract only the current value
+                print(self.current_parameter)
+            elif parameter.startswith('s') and len(parameter) >= 3:
+                self.solar_voltage = float(parameter[1:])   # extract only the voltage value
+                self.time_count += 5
+                self.voltage_graph_cordinates_points.append((self.time_count % self.time_span, self.solar_voltage))
+                solar_points = MeshLinePlot(color=[0, 1, 0, 1])
+                solar_points.points = self.voltage_graph_cordinates_points
+                self.ids.main.ids.voltage_graph.add_plot(solar_points)
+                self.add_points(self.voltage_graph_cordinates_points, self.time_count % self.time_span,
+                                self.solar_voltage, 59)
+                # pot power graph
+                wattage_points = MeshLinePlot(color=[0, 1, 0, 1])
+                power = self.solar_voltage * self.current_parameter
+                self.wattage_graph_cordinates_points.append((self.time_count, power))
+                wattage_points.points = self.wattage_graph_cordinates_points
+                self.ids.main.ids.wattage_graph.add_plot(wattage_points)
+                self.add_points(self.wattage_graph_cordinates_points, self.time_count % self.time_span,
+                                power, 59)
+                # update status: turn on solar source
+                self.ids.main.ids.solar_voltage.status = 'ON'
+                self.ids.main.ids.solar_voltage.voltage = str(self.solar_voltage)
+                self.ids.main.ids.solar_voltage.dot_color = (0, 1, 0, 1)
+                # update status: turn off main
+                self.ids.main.ids.main_voltage.status = 'OFF'
+                self.ids.main.ids.main_voltage.dot_color = (1, 0, 0, 1)
+
+            elif parameter.startswith('m'):  # main voltage
+                self.main_voltage = float(parameter[1:])
+                self.ids.main.ids.main_voltage.voltage = parameter[1:]
+                self.time_count += 1
+                main_points = MeshLinePlot(color=[1, 0, 1, 1])
+                self.add_points(self.voltage_graph_cordinates_points, self.time_count % self.time_span, self.main_voltage, 59)
+                main_points.points = self.voltage_graph_cordinates_points
+                self.ids.main.ids.voltage_graph.add_plot(main_points)
+                print(self.time_count % self.time_span)
+                # pot power graph
+                wattage_points = MeshLinePlot(color=[0, 1, 0, 1])
+                power = self.main_voltage*self.current_parameter
+                self.wattage_graph_cordinates_points.append((self.time_count % self.time_span, power))
+                wattage_points.points = self.wattage_graph_cordinates_points
+                self.ids.main.ids.wattage_graph.add_plot(wattage_points)
+                self.add_points(self.wattage_graph_cordinates_points, self.time_count % self.time_span,
+                                power, 59)
+                # update status: turn on solar source
+                self.ids.main.ids.main_voltage.status = 'ON'
+                self.ids.main.ids.main_voltage.voltage = str(self.main_voltage)
+                self.ids.main.ids.main_voltage.dot_color = (0, 1, 0, 1)
+                # update status: turn off main
+                self.ids.main.ids.solar_voltage.status = 'OFF'
+                self.ids.main.ids.solar_voltage.dot_color = (1, 0, 0, 1)
+            elif parameter.startswith('a') and parameter[-1] == 'l':
+                status = parameter[1:-1]
+                if status == '00':
+                    self.ids.main.ids.load.non_critical_load_text = 'OFF'
+                    self.ids.main.ids.load.critical_load_text = 'OFF'
+                    self.ids.main.ids.load.dot_color = (1, 0, 0, 1)
+                elif status == '01':
+                    self.ids.main.ids.load.non_critical_load_text = 'OFF'
+                    self.ids.main.ids.load.critical_load_text = 'ON'
+                    self.ids.main.ids.load.dot_color = (0, 1, 0, 1)
+                elif status == '10':
+                    self.ids.main.ids.load.non_critical_load_text = 'ON'
+                    self.ids.main.ids.load.critical_load_text = 'OFF'
+                    self.ids.main.ids.load.dot_color = (0, 1, 0, 1)
+                else:
+                    self.ids.main.ids.load.non_critical_load_text = 'ON'
+                    self.ids.main.ids.load.critical_load_text = 'ON'
+                    self.ids.main.ids.load.dot_color = (0, 1, 0, 1)
+        else:
+            print('Nothing received yet from Arduino')
+
+    def add_points(self, points_list, x_value, y_value, limit):
+        """ Add new points to the list of points"""
+        points_list.append((x_value, y_value))
+        if len(points_list) >= limit:
+            del points_list[0]
+            points_list = [(x, y) for x, y in zip(self.time_series, points_list[:][1])]
+
+    def get_app_state(self, data_id):
+        """ Restore state of the application upon resumption."""
+        try: 
+            print(self.app_state.get(data_id))
+        except:
+            print(f'nothing found for {data_id}')
+
+    def update_app_state(self, button, state):
+        """ Update the state of the application. """
+        if button.text == 'hybrid':
+            self.app_state.put('hybrid', state=state)
+        elif button.text == 'wind':
+            self.app_state.put('wind', state=state)
+        elif button.text == 'solar':
+            self.app_state.put('solar', state=state)
+        else:
+            self.app_state.put('battery', state=state)
+
+    def select_tab_item(self, tab_item, text):
+        # tab_item.bold = True
+        tab_item.color = (0.9, 1, 0.9, 1)
+        print(tab_item.text)
+        selected_tab = 'main_screen'
+        if tab_item.text == 'about':
+            selected_tab = 'about_screen'
+        elif tab_item.text == 'dashboard':
+            selected_tab = 'main_screen'
+        elif tab_item.text == 'settings':
+            selected_tab = 'settings_screen'
+        return selected_tab
+
+    def on_off(self, button, state, dot, sent_from):
+        if state == 'down':
+            dot.background_color = (0, 1, 0, 1)
+            button.custom_background_color = (0, 1, 0, 0.7)
+            button.text = 'OFF'
+            if sent_from == 'hybrid':
+                # connect hybrid
+                serial_interface.connect_to_plant('h')
+                pass
+            elif sent_from == 'grid':
+                # connect grid plant
+                serial_interface.connect_to_plant('g')
+            elif sent_from == 'solar':
+                # connect solar plant
+                serial_interface.connect_to_plant('s')
+            elif sent_from == 'battery':
+                serial_interface.connect_to_plant('b')
+        else:
+            dot.background_color = (1, 0, 0, 1)
+            button.custom_background_color = (1, 0, 0, 0.5)
+            button.text = 'ON'
+
+            if sent_from == 'hybrid':
+                # disconnect hybrid
+                serial_interface.disconnect_from_plant('h')
+                pass
+            elif sent_from == 'grid':
+                # disconnect grid
+                serial_interface.disconnect_from_plant('g')
+            elif sent_from == 'solar':
+                # disconnect solar
+                serial_interface.disconnect_from_plant('s')
+            elif sent_from == 'battery':
+                # disconnect battery
+                serial_interface.disconnect_from_plant('b')
+        self.update_app_state(button, state)
+            
+
+class MyLayout(Widget):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.flag = False
+
+
+Builder.load_file('settings.kv')
+Builder.load_file('about.kv')
+Builder.load_file('tabbedpannel.kv')
+kv_layout = Builder.load_file('design.kv')
+
+
+class HybridPowerSupply(App):
+    def build(self):
+        Window.clearcolor = (1, 1, 1, 0.1)
+        Window.size = (1200, 700)
+        kv_layout.start()
+        return kv_layout
+
+
+if __name__ == '__main__':
+    HybridPowerSupply().run()
